@@ -1,0 +1,26 @@
+listen_port: 9108
+emit_raw_metrics: false
+keepalive_seconds: 20
+keepalive_timeout_ratio: 4.5
+labels:
+  site: home
+nodes:
+  - name: livingroom
+    host: 192.168.1.10
+    port: 6053
+    password: !secret livingroom_api_password
+    labels:
+      site: home
+      room: livingroom
+    filters:
+      exclude_object_ids: [wifi_signal]
+      exclude_name_regex: "Debug|Uptime"
+    # Optional for encrypted ESPHome API connections:
+    # noise_psk: !secret livingroom_noise_psk
+
+  - name: garage
+    host: garage-esphome.local
+    password: !secret garage_api_password
+    labels:
+      site: home
+      room: garage

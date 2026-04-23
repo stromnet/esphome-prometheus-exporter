@@ -1,0 +1,4 @@
+aioesphomeapi
+prometheus-client
+PyYAML
+pytest
