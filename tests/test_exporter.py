@@ -18,7 +18,7 @@ from prometheus_client import CollectorRegistry
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from esphome_prometheus_exporter.app import reload_exporters
+from esphome_prometheus_exporter.app import create_logged_task, reload_exporters
 from esphome_prometheus_exporter.config import (
     ExporterConfig,
     FilterConfig,
@@ -257,6 +257,21 @@ nodes:
     )
     with pytest.raises(ValueError, match="Secret 'api_password' not found"):
         exporter.load_config(str(path))
+
+
+def test_create_logged_task_logs_exceptions(caplog):
+    async def boom():
+        raise RuntimeError("boom")
+
+    async def runner():
+        create_logged_task(boom(), name="node:test")
+        await asyncio.sleep(0)
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(runner())
+
+    assert "Background task node:test failed" in caplog.text
+    assert "RuntimeError: boom" in caplog.text
 
 
 def test_reload_exporters_adds_and_removes_nodes(tmp_path, monkeypatch):

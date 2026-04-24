@@ -13,6 +13,22 @@ from .metrics import MetricStore
 from .node import NodeExporter
 
 
+def create_logged_task(coro: Any, *, name: str) -> asyncio.Task[Any]:
+    task = asyncio.create_task(coro, name=name)
+
+    def _log_task_result(completed_task: asyncio.Task[Any]) -> None:
+        try:
+            exc = completed_task.exception()
+        except asyncio.CancelledError:
+            return
+
+        if exc is not None:
+            logging.exception("Background task %s failed", completed_task.get_name(), exc_info=exc)
+
+    task.add_done_callback(_log_task_result)
+    return task
+
+
 async def reload_exporters(
     *,
     config_path: str,
@@ -59,7 +75,7 @@ async def reload_exporters(
         if key not in exporters:
             exporter = NodeExporter(node, metric_store=metric_store)
             exporters[key] = exporter
-            tasks[key] = asyncio.create_task(exporter.run_forever(), name=f"node:{exporter.config.name}")
+            tasks[key] = create_logged_task(exporter.run_forever(), name=f"node:{exporter.config.name}")
 
     return exporter_config, metric_store, exporters, tasks
 
@@ -81,7 +97,7 @@ async def amain() -> None:
 
     metric_store = MetricStore(exporter_config=exporter_config)
     exporters = {node_identity(node): NodeExporter(node, metric_store=metric_store) for node in nodes}
-    tasks = {key: asyncio.create_task(exporter.run_forever(), name=f"node:{exporter.config.name}") for key, exporter in exporters.items()}
+    tasks = {key: create_logged_task(exporter.run_forever(), name=f"node:{exporter.config.name}") for key, exporter in exporters.items()}
 
     stop_event = asyncio.Event()
     reload_event = asyncio.Event()
