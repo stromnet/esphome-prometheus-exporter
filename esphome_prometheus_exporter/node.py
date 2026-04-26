@@ -13,6 +13,20 @@ from .config import FilterConfig, NodeConfig
 from .metrics import MetricStore, _is_nan, base_labels, device_class, unit_of_measurement
 
 
+def monkeypatch_aioesphome() -> None:
+    """Monkeypatch aioesphomeapi to log instead of raise if zeroconf fails to start,
+    since that can cause the entire exporter to fail to start """
+    rcl = ReconnectLogic._start_zc_listen
+    def _wrap(self):
+        try:
+            rcl(self)
+        except:
+            logging.error("Could not start zeroconf for %s", self._cli.log_name)
+    ReconnectLogic._start_zc_listen = _wrap
+
+monkeypatch_aioesphome()
+
+
 def is_sensor_entity(entity: Any) -> bool:
     return isinstance(entity, SensorInfo)
 
