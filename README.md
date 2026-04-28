@@ -126,7 +126,7 @@ Note: text metrics are implemented with Prometheus `Info`, so the exporter regis
 
 `esphome_sensor_value` is always emitted for numeric sensors that do not have a normalized per-entity metric name, such as sensors without `device_class`. For sensors that do have a normalized metric, `esphome_sensor_value` is emitted only when `emit_raw_metrics: true` is enabled.
 
-All metrics also include any global static labels configured at the top-level under `labels:` as well as any per-node labels under `nodes[].labels:`. Per-node labels override global labels with the same key.
+Entity metrics also include `device_id` and `device_name`. `device_id` is the ESPHome device/subdevice id referenced by the entity, and `device_name` is populated when the node reports device metadata for that id. All metrics also include any global static labels configured at the top-level under `labels:` as well as any per-node labels under `nodes[].labels:`. Per-node labels override global labels with the same key.
 
 ### Dynamic per-entity metrics
 
@@ -145,6 +145,8 @@ These metrics use labels:
 - `node`
 - `object_id`
 - `name`
+- `device_id`
+- `device_name`
 - any global static labels configured under top-level `labels:`
 - any per-node labels configured under `nodes[].labels:`
 
@@ -163,11 +165,13 @@ Filtered entities are ignored entirely and produce no metrics.
 
 ## Running tests
 
+Use the project virtualenv's pytest directly:
+
 ```bash
 python3 -m virtualenv .pi-venv
 source .pi-venv/bin/activate
 python -m pip install -r requirements.txt
-pytest -v
+.pi-venv/bin/pytest -v
 ```
 
 ## Notes

@@ -48,9 +48,13 @@ exporter = SimpleNamespace(
 
 
 class FakeClient:
-    def __init__(self, entities=None):
+    def __init__(self, entities=None, device_info=None):
         self.entities = entities or []
+        self.device_info_value = device_info
         self.subscribed_callback = None
+
+    async def device_info(self):
+        return self.device_info_value
 
     async def list_entities_services(self):
         return self.entities, []
@@ -342,7 +346,7 @@ def test_on_connect_filters_entities_and_counts_reconnects_and_errors():
     node_exporter.client = FakeClient(entities=[temp, power])
 
     asyncio.run(node_exporter._on_connect())
-    assert set(node_exporter.entities_by_key) == {1}
+    assert set(node_exporter.entities_by_key) == {(0, 1)}
     asyncio.run(node_exporter._on_disconnect(False))
     asyncio.run(node_exporter._on_connect())
     asyncio.run(node_exporter._on_connect_error(RuntimeError("boom")))
@@ -486,13 +490,15 @@ def test_numeric_state_updates_only_dynamic_metrics_by_default():
             "entity_key": "1",
             "object_id": "living_room_temp",
             "name": "Living Room Temp",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "temperature",
             "unit": "°C",
         },
     )
     dynamic_value = registry.get_sample_value(
         "esphome_temperature_celsius",
-        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp"},
+        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp", "device_id": "0", "device_name": ""},
     )
     assert generic_value is None
     assert dynamic_value == 21.5
@@ -512,13 +518,15 @@ def test_numeric_state_without_device_class_emits_raw_metric_by_default():
             "entity_key": "1",
             "object_id": "mb21_apparent_power",
             "name": "mb21 Apparent Power",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "",
             "unit": "VA",
         },
     ) == 42.0
     assert registry.get_sample_value(
         "esphome_apparent_power_va",
-        labels={"node": "kitchen", "object_id": "mb21_apparent_power", "name": "mb21 Apparent Power"},
+        labels={"node": "kitchen", "object_id": "mb21_apparent_power", "name": "mb21 Apparent Power", "device_id": "0", "device_name": ""},
     ) is None
 
 
@@ -536,13 +544,15 @@ def test_numeric_state_without_device_class_can_emit_raw_metric_when_enabled():
             "entity_key": "1",
             "object_id": "mb21_apparent_power",
             "name": "mb21 Apparent Power",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "",
             "unit": "VA",
         },
     ) == 42.0
     assert registry.get_sample_value(
         "esphome_apparent_power_va",
-        labels={"node": "kitchen", "object_id": "mb21_apparent_power", "name": "mb21 Apparent Power"},
+        labels={"node": "kitchen", "object_id": "mb21_apparent_power", "name": "mb21 Apparent Power", "device_id": "0", "device_name": ""},
     ) is None
 
 
@@ -560,13 +570,15 @@ def test_numeric_state_with_specific_metric_can_emit_raw_metrics_when_enabled():
             "entity_key": "1",
             "object_id": "living_room_temp",
             "name": "Living Room Temp",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "temperature",
             "unit": "°C",
         },
     )
     dynamic_value = registry.get_sample_value(
         "esphome_temperature_celsius",
-        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp"},
+        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp", "device_id": "0", "device_name": ""},
     )
     assert generic_value == 21.5
     assert dynamic_value == 21.5
@@ -588,11 +600,11 @@ def test_numeric_total_increasing_sensor_uses_counter_metric():
 
     assert registry.get_sample_value(
         "esphome_energy_kilowatt_hours_total",
-        labels={"node": "kitchen", "object_id": "energy_today", "name": "Energy Today"},
+        labels={"node": "kitchen", "object_id": "energy_today", "name": "Energy Today", "device_id": "0", "device_name": ""},
     ) == 12.5
     assert registry.get_sample_value(
         "esphome_energy_kilowatt_hours",
-        labels={"node": "kitchen", "object_id": "energy_today", "name": "Energy Today"},
+        labels={"node": "kitchen", "object_id": "energy_today", "name": "Energy Today", "device_id": "0", "device_name": ""},
     ) is None
 
 
@@ -613,7 +625,7 @@ def test_numeric_total_increasing_sensor_counter_handles_reset():
 
     assert registry.get_sample_value(
         "esphome_energy_kilowatt_hours_total",
-        labels={"node": "kitchen", "object_id": "energy_today", "name": "Energy Today"},
+        labels={"node": "kitchen", "object_id": "energy_today", "name": "Energy Today", "device_id": "0", "device_name": ""},
     ) == 1.5
 
 
@@ -631,12 +643,14 @@ def test_binary_state_updates_only_dynamic_metric_by_default():
             "entity_key": "2",
             "object_id": "front_door",
             "name": "Front Door",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "door",
         },
     )
     dynamic_value = registry.get_sample_value(
         "esphome_door",
-        labels={"node": "kitchen", "object_id": "front_door", "name": "Front Door"},
+        labels={"node": "kitchen", "object_id": "front_door", "name": "Front Door", "device_id": "0", "device_name": ""},
     )
     assert generic_value is None
     assert dynamic_value == 1.0
@@ -656,6 +670,8 @@ def test_binary_state_without_device_class_emits_raw_metric_by_default():
             "entity_key": "2",
             "object_id": "garage_motion",
             "name": "Garage Motion",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "",
         },
     )
@@ -676,12 +692,14 @@ def test_binary_state_with_specific_metric_can_emit_raw_when_enabled():
             "entity_key": "2",
             "object_id": "front_door",
             "name": "Front Door",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "door",
         },
     )
     dynamic_value = registry.get_sample_value(
         "esphome_door",
-        labels={"node": "kitchen", "object_id": "front_door", "name": "Front Door"},
+        labels={"node": "kitchen", "object_id": "front_door", "name": "Front Door", "device_id": "0", "device_name": ""},
     )
     assert generic_value == 1.0
     assert dynamic_value == 1.0
@@ -701,13 +719,15 @@ def test_text_state_updates_info_metrics():
             "entity_key": "3",
             "object_id": "firmware_status",
             "name": "Firmware Status",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "",
             "value": "ok",
         },
     )
     dynamic_value = registry.get_sample_value(
         "esphome_firmware_status_info",
-        labels={"node": "kitchen", "object_id": "firmware_status", "name": "Firmware Status", "value": "ok"},
+        labels={"node": "kitchen", "object_id": "firmware_status", "name": "Firmware Status", "device_id": "0", "device_name": "", "value": "ok"},
     )
     assert generic_value == 1.0
     assert dynamic_value is None
@@ -721,13 +741,15 @@ def test_text_state_updates_info_metrics():
             "entity_key": "3",
             "object_id": "firmware_status",
             "name": "Firmware Status",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "",
             "value": "ok",
         },
     )
     old_dynamic_value = registry.get_sample_value(
         "esphome_firmware_status_info",
-        labels={"node": "kitchen", "object_id": "firmware_status", "name": "Firmware Status", "value": "ok"},
+        labels={"node": "kitchen", "object_id": "firmware_status", "name": "Firmware Status", "device_id": "0", "device_name": "", "value": "ok"},
     )
     new_generic_value = registry.get_sample_value(
         "esphome_text_sensor_info",
@@ -736,13 +758,15 @@ def test_text_state_updates_info_metrics():
             "entity_key": "3",
             "object_id": "firmware_status",
             "name": "Firmware Status",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "",
             "value": "warn",
         },
     )
     new_dynamic_value = registry.get_sample_value(
         "esphome_firmware_status_info",
-        labels={"node": "kitchen", "object_id": "firmware_status", "name": "Firmware Status", "value": "warn"},
+        labels={"node": "kitchen", "object_id": "firmware_status", "name": "Firmware Status", "device_id": "0", "device_name": "", "value": "warn"},
     )
     assert old_generic_value in (0.0, None)
     assert old_dynamic_value in (0.0, None)
@@ -765,13 +789,15 @@ def test_stale_cleanup_removes_old_metrics():
             "entity_key": "1",
             "object_id": "living_room_temp",
             "name": "Living Room Temp",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "temperature",
             "unit": "°C",
         },
     )
     dynamic_value = registry.get_sample_value(
         "esphome_temperature_celsius",
-        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp"},
+        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp", "device_id": "0", "device_name": ""},
     )
     assert generic_value is None
     assert dynamic_value is None
@@ -798,13 +824,15 @@ def test_disconnect_cleanup_removes_node_metrics():
             "entity_key": "1",
             "object_id": "living_room_temp",
             "name": "Living Room Temp",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "temperature",
             "unit": "°C",
         },
     ) is None
     assert registry.get_sample_value(
         "esphome_temperature_celsius",
-        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp"},
+        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp", "device_id": "0", "device_name": ""},
     ) is None
     assert registry.get_sample_value(
         "esphome_binary_sensor_value",
@@ -813,12 +841,14 @@ def test_disconnect_cleanup_removes_node_metrics():
             "entity_key": "2",
             "object_id": "front_door",
             "name": "Front Door",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "door",
         },
     ) is None
     assert registry.get_sample_value(
         "esphome_door",
-        labels={"node": "kitchen", "object_id": "front_door", "name": "Front Door"},
+        labels={"node": "kitchen", "object_id": "front_door", "name": "Front Door", "device_id": "0", "device_name": ""},
     ) is None
     assert registry.get_sample_value(
         "esphome_text_sensor_info",
@@ -827,13 +857,15 @@ def test_disconnect_cleanup_removes_node_metrics():
             "entity_key": "3",
             "object_id": "firmware_status",
             "name": "Firmware Status",
+            "device_id": "0",
+            "device_name": "",
             "device_class": "",
             "value": "ok",
         },
     ) is None
     assert registry.get_sample_value(
         "esphome_firmware_status_info",
-        labels={"node": "kitchen", "object_id": "firmware_status", "name": "Firmware Status", "value": "ok"},
+        labels={"node": "kitchen", "object_id": "firmware_status", "name": "Firmware Status", "device_id": "0", "device_name": "", "value": "ok"},
     ) is None
     assert registry.get_sample_value(
         "esphome_node_entities",
@@ -855,11 +887,54 @@ def test_on_connect_discovers_entities_and_subscribes():
 
     asyncio.run(node_exporter._on_connect())
 
-    assert node_exporter.entities_by_key[1] == entity
+    assert node_exporter.entities_by_key[(0, 1)] == entity
     assert node_exporter.client.subscribed_callback == node_exporter._handle_state
     assert registry.get_sample_value("esphome_node_up", labels={"node": "kitchen", "host": "kitchen.local", "site": "home"}) == 1.0
     assert registry.get_sample_value("esphome_node_entities", labels={"node": "kitchen", "host": "kitchen.local", "site": "home"}) == 1.0
     assert registry.get_sample_value("esphome_node_scrape_success", labels={"node": "kitchen", "host": "kitchen.local", "site": "home"}) == 1.0
+
+
+def test_on_connect_populates_device_labels_from_device_info():
+    registry, _, node_exporter = make_node_exporter()
+    entity = SensorInfo(key=1, device_id=2, object_id="living_room_temp", name="Living Room Temp", unit_of_measurement="°C", device_class="temperature")
+    device_info = SimpleNamespace(
+        name="kitchen-node",
+        friendly_name="Kitchen Node",
+        devices=[SimpleNamespace(device_id=2, name="Probe A")],
+    )
+    node_exporter.client = FakeClient(entities=[entity], device_info=device_info)
+
+    asyncio.run(node_exporter._on_connect())
+    node_exporter._handle_state(SensorState(key=1, device_id=2, state=21.5))
+
+    assert registry.get_sample_value(
+        "esphome_temperature_celsius",
+        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp", "device_id": "2", "device_name": "Probe A"},
+    ) == 21.5
+
+
+def test_state_lookup_uses_device_id_and_key_tuple():
+    registry, _, node_exporter = make_node_exporter()
+    entity_a = SensorInfo(key=1, device_id=2, object_id="probe_a_temp", name="Probe A Temp", unit_of_measurement="°C", device_class="temperature")
+    entity_b = SensorInfo(key=1, device_id=3, object_id="probe_b_temp", name="Probe B Temp", unit_of_measurement="°C", device_class="temperature")
+    device_info = SimpleNamespace(
+        name="kitchen-node",
+        friendly_name="Kitchen Node",
+        devices=[SimpleNamespace(device_id=2, name="Probe A"), SimpleNamespace(device_id=3, name="Probe B")],
+    )
+    node_exporter.client = FakeClient(entities=[entity_a, entity_b], device_info=device_info)
+
+    asyncio.run(node_exporter._on_connect())
+    node_exporter._handle_state(SensorState(key=1, device_id=3, state=21.5))
+
+    assert registry.get_sample_value(
+        "esphome_temperature_celsius",
+        labels={"node": "kitchen", "object_id": "probe_a_temp", "name": "Probe A Temp", "device_id": "2", "device_name": "Probe A"},
+    ) is None
+    assert registry.get_sample_value(
+        "esphome_temperature_celsius",
+        labels={"node": "kitchen", "object_id": "probe_b_temp", "name": "Probe B Temp", "device_id": "3", "device_name": "Probe B"},
+    ) == 21.5
 
 
 def test_on_disconnect_removes_metrics():
@@ -875,7 +950,7 @@ def test_on_disconnect_removes_metrics():
     assert node_exporter.entities_by_key == {}
     assert registry.get_sample_value(
         "esphome_temperature_celsius",
-        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp"},
+        labels={"node": "kitchen", "object_id": "living_room_temp", "name": "Living Room Temp", "device_id": "0", "device_name": ""},
     ) is None
     assert registry.get_sample_value("esphome_node_entities", labels={"node": "kitchen", "host": "kitchen.local"}) is None
     assert registry.get_sample_value("esphome_node_up", labels={"node": "kitchen", "host": "kitchen.local"}) == 0.0

@@ -18,11 +18,14 @@ def _is_nan(value: Any) -> bool:
 
 
 def base_labels(entity: Any, node: str, static_labels: Optional[dict[str, str]] = None) -> dict[str, str]:
+    raw_device_id = getattr(entity, "device_id", "")
     return {
         "node": node,
         "entity_key": str(getattr(entity, "key", "")),
         "object_id": getattr(entity, "object_id", "") or "",
         "name": getattr(entity, "name", getattr(entity, "object_id", "")) or "",
+        "device_id": "" if raw_device_id is None else str(raw_device_id),
+        "device_name": getattr(entity, "device_name", "") or "",
         **(static_labels or {}),
     }
 
@@ -117,8 +120,8 @@ class MetricStore:
         self.text_values_by_entity: dict[tuple[str, str], str] = {}
         self.numeric_values_by_entity: dict[tuple[str, str], float] = {}
 
-        entity_base_labels = ["node", "entity_key", "object_id", "name", *self.static_label_keys]
-        dynamic_base_labels = ["node", "object_id", "name", *self.static_label_keys]
+        entity_base_labels = ["node", "entity_key", "object_id", "name", "device_id", "device_name", *self.static_label_keys]
+        dynamic_base_labels = ["node", "object_id", "name", "device_id", "device_name", *self.static_label_keys]
         node_base_labels = ["node", "host", *self.static_label_keys]
 
         self.numeric_fallback = Gauge(
@@ -165,10 +168,10 @@ class MetricStore:
             self.last_update,
         ]
 
-    def register_entity(self, node: str, entity: Any, static_labels: Optional[dict[str, str]] = None) -> None:
-        self.entity_labels_by_id[self._entity_id(node, entity)] = base_labels(entity, node, static_labels)
+    def register_entity(self, node: str, entity: Any, static_labels: Optional[dict[str, str]] = None, labels: Optional[dict[str, str]] = None) -> None:
+        self.entity_labels_by_id[self._entity_id(node, entity)] = labels or base_labels(entity, node, static_labels)
 
-    def cleanup_stale_entities(self, node: str, current_entities: dict[int, Any]) -> None:
+    def cleanup_stale_entities(self, node: str, current_entities: dict[Any, Any]) -> None:
         current_ids = {self._entity_id(node, entity) for entity in current_entities.values()}
         stale_ids = [entity_id for entity_id in self.entity_labels_by_id if entity_id[0] == node and entity_id not in current_ids]
         for stale_id in stale_ids:
@@ -194,13 +197,22 @@ class MetricStore:
                 "entity_key": labels["entity_key"],
                 "object_id": labels["object_id"],
                 "name": labels["name"],
+                "device_id": labels["device_id"],
+                "device_name": labels["device_name"],
                 **self._extract_static_labels(labels),
                 "device_class": device_class(entity),
                 "unit": unit_of_measurement(entity),
             }
             self.numeric_fallback.labels(**fallback_labels).set(value)
         if metric is not None:
-            metric_labels = {"node": labels["node"], "object_id": labels["object_id"], "name": labels["name"], **self._extract_static_labels(labels)}
+            metric_labels = {
+                "node": labels["node"],
+                "object_id": labels["object_id"],
+                "name": labels["name"],
+                "device_id": labels["device_id"],
+                "device_name": labels["device_name"],
+                **self._extract_static_labels(labels),
+            }
             if is_total_increasing(entity):
                 entity_id = self._entity_id(labels["node"], entity)
                 previous_value = self.numeric_values_by_entity.get(entity_id)
@@ -209,7 +221,7 @@ class MetricStore:
                 elif value >= previous_value:
                     metric.labels(**metric_labels).inc(value - previous_value)
                 else:
-                    self._safe_remove(metric, labels["node"], labels["object_id"], labels["name"], *self._static_label_values(self._extract_static_labels(labels)))
+                    self._safe_remove(metric, labels["node"], labels["object_id"], labels["name"], labels["device_id"], labels["device_name"], *self._static_label_values(self._extract_static_labels(labels)))
                     metric.labels(**metric_labels).inc(value)
                 self.numeric_values_by_entity[entity_id] = value
             else:
@@ -225,12 +237,21 @@ class MetricStore:
                 "entity_key": labels["entity_key"],
                 "object_id": labels["object_id"],
                 "name": labels["name"],
+                "device_id": labels["device_id"],
+                "device_name": labels["device_name"],
                 **self._extract_static_labels(labels),
                 "device_class": device_class(entity),
             }
             self.binary_fallback.labels(**fallback_labels).set(numeric_value)
         if metric is not None:
-            metric.labels(node=labels["node"], object_id=labels["object_id"], name=labels["name"], **self._extract_static_labels(labels)).set(numeric_value)
+            metric.labels(
+                node=labels["node"],
+                object_id=labels["object_id"],
+                name=labels["name"],
+                device_id=labels["device_id"],
+                device_name=labels["device_name"],
+                **self._extract_static_labels(labels),
+            ).set(numeric_value)
 
     def set_text(self, entity: Any, labels: dict[str, str], value: Any) -> None:
         fallback_labels = {
@@ -238,6 +259,8 @@ class MetricStore:
             "entity_key": labels["entity_key"],
             "object_id": labels["object_id"],
             "name": labels["name"],
+            "device_id": labels["device_id"],
+            "device_name": labels["device_name"],
             **self._extract_static_labels(labels),
             "device_class": device_class(entity),
         }
@@ -245,30 +268,37 @@ class MetricStore:
         text_value = "" if value is None else str(value)
         old_value = self.text_values_by_entity.get(entity_id)
         if old_value is not None and old_value != text_value:
-            self._safe_remove(self.text_fallback, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], *self._static_label_values(self._extract_static_labels(labels)), device_class(entity))
+            self._safe_remove(self.text_fallback, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], labels["device_id"], labels["device_name"], *self._static_label_values(self._extract_static_labels(labels)), device_class(entity))
             dynamic_metric = self._text_metric_for_entity(entity)
             if dynamic_metric is not None:
-                self._safe_remove(dynamic_metric, labels["node"], labels["object_id"], labels["name"], *self._static_label_values(self._extract_static_labels(labels)))
+                self._safe_remove(dynamic_metric, labels["node"], labels["object_id"], labels["name"], labels["device_id"], labels["device_name"], *self._static_label_values(self._extract_static_labels(labels)))
         self.text_values_by_entity[entity_id] = text_value
         self.text_fallback.labels(**fallback_labels).info({"value": text_value})
         metric = self._text_metric_for_entity(entity)
         if metric is not None:
-            metric.labels(node=labels["node"], object_id=labels["object_id"], name=labels["name"], **self._extract_static_labels(labels)).info({"value": text_value})
+            metric.labels(
+                node=labels["node"],
+                object_id=labels["object_id"],
+                name=labels["name"],
+                device_id=labels["device_id"],
+                device_name=labels["device_name"],
+                **self._extract_static_labels(labels),
+            ).info({"value": text_value})
 
     def _remove_entity_metrics(self, labels: dict[str, str]) -> None:
         static_values = self._static_label_values(self._extract_static_labels(labels))
-        self._safe_remove(self.last_update, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], *static_values)
-        self._safe_remove(self.numeric_fallback, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], *static_values, labels.get("device_class", ""), labels.get("unit", ""))
-        self._safe_remove(self.binary_fallback, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], *static_values, labels.get("device_class", ""))
-        self._safe_remove(self.text_fallback, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], *static_values, labels.get("device_class", ""))
+        self._safe_remove(self.last_update, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], labels.get("device_id", ""), labels.get("device_name", ""), *static_values)
+        self._safe_remove(self.numeric_fallback, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], labels.get("device_id", ""), labels.get("device_name", ""), *static_values, labels.get("device_class", ""), labels.get("unit", ""))
+        self._safe_remove(self.binary_fallback, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], labels.get("device_id", ""), labels.get("device_name", ""), *static_values, labels.get("device_class", ""))
+        self._safe_remove(self.text_fallback, labels["node"], labels["entity_key"], labels["object_id"], labels["name"], labels.get("device_id", ""), labels.get("device_name", ""), *static_values, labels.get("device_class", ""))
         dynamic_name = labels.get("dynamic_metric_name")
         if dynamic_name:
             if dynamic_name in self.dynamic_gauges:
-                self._safe_remove(self.dynamic_gauges[dynamic_name], labels["node"], labels["object_id"], labels["name"], *static_values)
+                self._safe_remove(self.dynamic_gauges[dynamic_name], labels["node"], labels["object_id"], labels["name"], labels.get("device_id", ""), labels.get("device_name", ""), *static_values)
             if dynamic_name in self.dynamic_counters:
-                self._safe_remove(self.dynamic_counters[dynamic_name], labels["node"], labels["object_id"], labels["name"], *static_values)
+                self._safe_remove(self.dynamic_counters[dynamic_name], labels["node"], labels["object_id"], labels["name"], labels.get("device_id", ""), labels.get("device_name", ""), *static_values)
             if dynamic_name in self.text_infos:
-                self._safe_remove(self.text_infos[dynamic_name], labels["node"], labels["object_id"], labels["name"], *static_values)
+                self._safe_remove(self.text_infos[dynamic_name], labels["node"], labels["object_id"], labels["name"], labels.get("device_id", ""), labels.get("device_name", ""), *static_values)
 
     @staticmethod
     def _safe_remove(metric: Any, *label_values: str) -> None:
@@ -278,8 +308,12 @@ class MetricStore:
             pass
 
     @staticmethod
-    def _entity_id(node: str, entity: Any) -> tuple[str, str]:
-        return node, str(getattr(entity, "key", getattr(entity, "object_id", id(entity))))
+    def _entity_id(node: str, entity: Any) -> tuple[str, str, str]:
+        return (
+            node,
+            str(getattr(entity, "device_id", 0) or 0),
+            str(getattr(entity, "key", getattr(entity, "object_id", id(entity)))),
+        )
 
     def _extract_static_labels(self, labels: dict[str, str]) -> dict[str, str]:
         return {key: labels.get(key, "") for key in self.static_label_keys}

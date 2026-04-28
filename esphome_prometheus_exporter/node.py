@@ -63,7 +63,8 @@ class NodeExporter:
     def __init__(self, config: NodeConfig, metric_store: Optional[MetricStore] = None):
         self.config = config
         self.metric_store = metric_store or MetricStore()
-        self.entities_by_key: dict[int, Any] = {}
+        self.entities_by_key: dict[tuple[int, int] | int, Any] = {}
+        self.device_labels_by_id: dict[int, dict[str, str]] = {}
         self.stop_event = asyncio.Event()
         self.client: Any = None
         self.had_successful_connect = False
@@ -94,6 +95,7 @@ class NodeExporter:
         finally:
             await logic.stop()
             self.entities_by_key = {}
+            self.device_labels_by_id = {}
             self.metric_store.cleanup_node_metrics(self.config.name, self.config.host, self.config.static_labels)
             self.metric_store.node_up.labels(**self._node_metric_labels()).set(0)
             try:
@@ -107,12 +109,24 @@ class NodeExporter:
             self.metric_store.node_reconnects.labels(**node_labels).inc()
         self.had_successful_connect = True
         self.metric_store.node_up.labels(**node_labels).set(1)
-        entities, _services = await self.client.list_entities_services()
+        device_info = None
+        if hasattr(self.client, "device_info_and_list_entities"):
+            device_info, entities, _services = await self.client.device_info_and_list_entities()
+        else:
+            if hasattr(self.client, "device_info"):
+                try:
+                    device_info = await self.client.device_info()
+                except Exception:
+                    device_info = None
+            entities, _services = await self.client.list_entities_services()
+        self.device_labels_by_id = self._device_labels_by_id(device_info)
         filtered_entities = [entity for entity in entities if should_export_entity(entity, self.config.filters)]
-        self.entities_by_key = {entity.key: entity for entity in filtered_entities}
+        self.entities_by_key = {self._entity_lookup_key(entity): entity for entity in filtered_entities}
         self.metric_store.cleanup_stale_entities(self.config.name, self.entities_by_key)
         for entity in filtered_entities:
-            self.metric_store.register_entity(self.config.name, entity, self.config.static_labels)
+            labels = base_labels(entity, self.config.name, self.config.static_labels)
+            labels.update(self.device_labels_by_id.get(getattr(entity, "device_id", 0), {}))
+            self.metric_store.register_entity(self.config.name, entity, self.config.static_labels, labels=labels)
         self.metric_store.node_entities.labels(**node_labels).set(len(self.entities_by_key))
         self.metric_store.node_scrape_success.labels(**node_labels).set(1)
         self.metric_store.node_last_success.labels(**node_labels).set_to_current_time()
@@ -123,6 +137,7 @@ class NodeExporter:
         node_labels = self._node_metric_labels()
         self.metric_store.node_disconnects.labels(**node_labels, expected=str(bool(expected_disconnect)).lower()).inc()
         self.entities_by_key = {}
+        self.device_labels_by_id = {}
         self.metric_store.cleanup_node_metrics(self.config.name, self.config.host, self.config.static_labels)
         self.metric_store.node_up.labels(**node_labels).set(0)
         if not self.stop_event.is_set():
@@ -137,16 +152,46 @@ class NodeExporter:
     def stop(self) -> None:
         self.stop_event.set()
 
+    def _device_labels_by_id(self, device_info: Any) -> dict[int, dict[str, str]]:
+        labels: dict[int, dict[str, str]] = {}
+        if device_info is None:
+            return labels
+        root_name = getattr(device_info, "friendly_name", "") or getattr(device_info, "name", "") or self.config.name
+        labels[0] = {"device_id": "0", "device_name": root_name}
+        for device in getattr(device_info, "devices", []) or []:
+            labels[getattr(device, "device_id", 0)] = {
+                "device_id": str(getattr(device, "device_id", "") or ""),
+                "device_name": getattr(device, "name", "") or "",
+            }
+        return labels
+
+    def _entity_lookup_key(self, entity_or_state: Any) -> tuple[int, int]:
+        return (
+            int(getattr(entity_or_state, "device_id", 0) or 0),
+            int(getattr(entity_or_state, "key", 0) or 0),
+        )
+
     def _handle_state(self, state: Any) -> None:
-        entity = self.entities_by_key.get(getattr(state, "key", None))
+        entity = self.entities_by_key.get(self._entity_lookup_key(state))
+        if entity is None:
+            entity = self.entities_by_key.get(getattr(state, "key", None))
         if entity is None:
             return
 
         labels = base_labels(entity, self.config.name, self.config.static_labels)
+        labels.update(self.device_labels_by_id.get(getattr(entity, "device_id", 0), {}))
         labels["device_class"] = device_class(entity)
         labels["unit"] = unit_of_measurement(entity)
         labels["dynamic_metric_name"] = self.metric_store._metric_name_for_entity(entity)
-        self.metric_store.last_update.labels(node=labels["node"], entity_key=labels["entity_key"], object_id=labels["object_id"], name=labels["name"], **self.metric_store._extract_static_labels(labels)).set_to_current_time()
+        self.metric_store.last_update.labels(
+            node=labels["node"],
+            entity_key=labels["entity_key"],
+            object_id=labels["object_id"],
+            name=labels["name"],
+            device_id=labels["device_id"],
+            device_name=labels["device_name"],
+            **self.metric_store._extract_static_labels(labels),
+        ).set_to_current_time()
         self.metric_store.entity_labels_by_id[self.metric_store._entity_id(self.config.name, entity)] = labels
 
         if is_sensor_entity(entity):
